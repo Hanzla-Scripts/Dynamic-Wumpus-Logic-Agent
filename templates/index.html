@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Wumpus World — Knowledge-Based Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:        #050b12;
+    --surface:   #0a1520;
+    --surface2:  #0f1e2e;
+    --border:    #1a3a5c;
+    --accent:    #00d4ff;
+    --accent2:   #00ff9d;
+    --danger:    #ff3d5a;
+    --warn:      #ffaa00;
+    --text:      #c8e0f0;
+    --text-dim:  #4a7090;
+    --safe:      #00ff9d;
+    --unknown:   #1a3a5c;
+    --hazard:    #ff3d5a;
+    --visited:   #0a2a40;
+    --agent:     #00d4ff;
+    --gold-c:    #ffd700;
+    --font-mono: 'Share Tech Mono', monospace;
+    --font-display: 'Orbitron', sans-serif;
+    --font-body: 'Exo 2', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,212,255,.015) 2px,
+      rgba(0,212,255,.015) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  /* ── HEADER ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    background: linear-gradient(90deg, #050b12 0%, #0a1a2e 100%);
+  }
+  .logo-mark {
+    width: 42px; height: 42px;
+    background: conic-gradient(from 0deg, var(--accent), var(--accent2), var(--accent));
+    clip-path: polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+    animation: spin 8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  header h1 {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    font-weight: 900;
+    letter-spacing: 3px;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,212,255,.5);
+  }
+  header p {
+    font-family: var(--font-mono);
+    font-size: .7rem;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+  .status-pill {
+    margin-left: auto;
+    padding: 5px 14px;
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: .75rem;
+    letter-spacing: 2px;
+    border: 1px solid currentColor;
+    text-transform: uppercase;
+  }
+  .status-pill.playing  { color: var(--accent2); border-color: var(--accent2); }
+  .status-pill.won      { color: var(--gold-c);  border-color: var(--gold-c); animation: pulse 1s infinite; }
+  .status-pill.dead     { color: var(--danger);  border-color: var(--danger); animation: pulse 1s infinite; }
+  .status-pill.stuck    { color: var(--warn);    border-color: var(--warn); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ── LAYOUT ── */
+  .app {
+    display: grid;
+    grid-template-columns: 280px 1fr 300px;
+    gap: 0;
+    height: calc(100vh - 73px);
+  }
+
+  /* ── PANELS ── */
+  .panel {
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel:last-child { border-right: none; border-left: 1px solid var(--border); }
+
+  .panel-title {
+    font-family: var(--font-display);
+    font-size: .6rem;
+    letter-spacing: 3px;
+    color: var(--text-dim);
+    padding: 14px 20px 8px;
+    border-bottom: 1px solid var(--border);
+    text-transform: uppercase;
+  }
+
+  .panel-body {
+    padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* ── CONTROLS ── */
+  .control-group { margin-bottom: 22px; }
+  .control-group label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: .7rem;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+
+  .dim-row { display: flex; gap: 8px; align-items: center; }
+  .dim-row span {
+    font-family: var(--font-mono);
+    font-size: .8rem;
+    color: var(--text-dim);
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--accent);
+    cursor: pointer;
+  }
+
+  .val-display {
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+    color: var(--accent);
+    text-align: center;
+    margin-top: 6px;
+    letter-spacing: 4px;
+  }
+
+  /* ── BUTTONS ── */
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 11px;
+    font-family: var(--font-display);
+    font-size: .65rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    border: none;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all .2s;
+    margin-bottom: 10px;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--bg);
+    box-shadow: 0 0 20px rgba(0,212,255,.3);
+  }
+  .btn-primary:hover { box-shadow: 0 0 30px rgba(0,212,255,.6); transform: translateY(-1px); }
+  .btn-secondary {
+    background: transparent;
+    color: var(--accent2);
+    border: 1px solid var(--accent2);
+  }
+  .btn-secondary:hover { background: rgba(0,255,157,.1); }
+  .btn-danger {
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+  }
+  .btn-danger:hover { background: rgba(255,61,90,.1); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; transform: none !important; }
+
+  /* ── LEGEND ── */
+  .legend { margin-top: 16px; }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    color: var(--text-dim);
+  }
+  .swatch {
+    width: 16px; height: 16px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ── GRID AREA ── */
+  .grid-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px;
+    gap: 20px;
+    background: radial-gradient(ellipse at center, #081525 0%, #050b12 100%);
+  }
+
+  #grid-container {
+    display: grid;
+    gap: 3px;
+    max-width: 100%;
+    max-height: 70vh;
+  }
+
+  .cell {
+    border-radius: 3px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    position: relative;
+    border: 1px solid transparent;
+    transition: all .3s ease;
+    cursor: default;
+    aspect-ratio: 1;
+    min-width: 48px;
+    min-height: 48px;
+  }
+
+  .cell-label {
+    font-family: var(--font-mono);
+    font-size: .5rem;
+    color: rgba(255,255,255,.3);
+    position: absolute;
+    top: 3px;
+    left: 4px;
+    letter-spacing: .5px;
+  }
+
+  .cell.unknown {
+    background: var(--unknown);
+    border-color: rgba(26,58,92,.5);
+  }
+  .cell.visited {
+    background: var(--visited);
+    border-color: rgba(0,212,255,.2);
+  }
+  .cell.safe-inferred {
+    background: rgba(0,255,157,.08);
+    border-color: rgba(0,255,157,.4);
+    box-shadow: 0 0 8px rgba(0,255,157,.15);
+  }
+  .cell.agent {
+    background: rgba(0,212,255,.18);
+    border-color: var(--accent);
+    box-shadow: 0 0 16px rgba(0,212,255,.5);
+    animation: agentPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes agentPulse {
+    0%,100% { box-shadow: 0 0 16px rgba(0,212,255,.5); }
+    50%      { box-shadow: 0 0 28px rgba(0,212,255,.9); }
+  }
+  .cell.hazard {
+    background: rgba(255,61,90,.18);
+    border-color: var(--danger);
+    box-shadow: 0 0 10px rgba(255,61,90,.3);
+  }
+  .cell.gold-here {
+    background: rgba(255,215,0,.15);
+    border-color: var(--gold-c);
+  }
+
+  .cell .emoji { font-size: 1.3rem; line-height: 1; }
+
+  /* ── PERCEPT BADGE ── */
+  .percept-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .percept-badge {
+    padding: 4px 12px;
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: 1px;
+    border: 1px solid;
+    animation: fadeIn .3s ease;
+  }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
+  .percept-badge.breeze  { color: #80d4ff; border-color: #80d4ff; background: rgba(128,212,255,.08); }
+  .percept-badge.stench  { color: #c8a0ff; border-color: #c8a0ff; background: rgba(200,160,255,.08); }
+  .percept-badge.glitter { color: var(--gold-c); border-color: var(--gold-c); background: rgba(255,215,0,.08); }
+  .percept-badge.none    { color: var(--text-dim); border-color: var(--border); }
+
+  /* ── METRICS PANEL ── */
+  .metric-block {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .metric-label {
+    font-family: var(--font-mono);
+    font-size: .62rem;
+    color: var(--text-dim);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .metric-value {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 3px;
+    line-height: 1;
+  }
+  .metric-value.green  { color: var(--accent2); }
+  .metric-value.red    { color: var(--danger); }
+  .metric-value.yellow { color: var(--warn); }
+  .metric-value.gold   { color: var(--gold-c); }
+
+  .metric-sub {
+    font-family: var(--font-mono);
+    font-size: .65rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ── LOG ── */
+  .log-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    color: var(--text-dim);
+    height: 160px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    line-height: 1.7;
+  }
+  .log-line { margin-bottom: 2px; }
+  .log-line.new { color: var(--accent2); }
+
+  /* ── SCORE ── */
+  .score-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .score-row .metric-block { flex: 1; }
+
+  /* ── AUTO PLAY ── */
+  .speed-row { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .speed-row label { font-family: var(--font-mono); font-size: .65rem; color: var(--text-dim); white-space: nowrap; }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    .panel { border-right: none; border-bottom: 1px solid var(--border); }
+    .panel:last-child { border-left: none; }
+    .grid-area { min-height: 55vw; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark"></div>
+  <div>
+    <h1>WUMPUS WORLD</h1>
+    <p>KNOWLEDGE-BASED PROPOSITIONAL LOGIC AGENT</p>
+  </div>
+  <div id="status-pill" class="status-pill playing">READY</div>
+</header>
+
+<div class="app">
+
+  <!-- ── LEFT PANEL: CONTROLS ── -->
+  <div class="panel">
+    <div class="panel-title">// Configuration</div>
+    <div class="panel-body">
+
+      <div class="control-group">
+        <label>Grid Rows</label>
+        <input type="range" id="rows-slider" min="3" max="10" value="5"
+               oninput="document.getElementById('rows-val').textContent=this.value"/>
+        <div class="val-display" id="rows-val">5</div>
+      </div>
+
+      <div class="control-group">
+        <label>Grid Columns</label>
+        <input type="range" id="cols-slider" min="3" max="10" value="5"
+               oninput="document.getElementById('cols-val').textContent=this.value"/>
+        <div class="val-display" id="cols-val">5</div>
+      </div>
+
+      <button class="btn btn-primary" onclick="newGame()">⬡ INIT NEW EPISODE</button>
+      <button class="btn btn-secondary" id="step-btn" onclick="stepAgent()" disabled>▶ STEP AGENT</button>
+
+      <div class="speed-row">
+        <label>Auto-Run:</label>
+        <input type="range" id="speed-slider" min="100" max="2000" value="600" step="100" style="flex:1"/>
+        <span id="speed-val" style="font-family:var(--font-mono);font-size:.65rem;color:var(--text-dim);width:50px;text-align:right">600ms</span>
+      </div>
+      <input type="range" id="speed-slider" min="100" max="2000" value="600" step="100" style="display:none"/>
+      <button class="btn btn-secondary" id="auto-btn" onclick="toggleAuto()" disabled>⟳ AUTO RUN</button>
+      <button class="btn btn-danger"    id="reveal-btn" onclick="revealAll()" disabled>◈ REVEAL ALL</button>
+
+      <div class="legend">
+        <div class="panel-title" style="padding:0 0 8px;border:none;margin-top:8px">// Cell Legend</div>
+        <div class="legend-item"><div class="swatch" style="background:rgba(0,212,255,.18);border:1px solid var(--accent)"></div>Agent (A)</div>
+        <div class="legend-item"><div class="swatch" style="background:rgba(0,255,157,.08);border:1px solid rgba(0,255,157,.4)"></div>Inferred Safe</div>
+        <div class="legend-item"><div class="swatch" style="background:var(--visited);border:1px solid rgba(0,212,255,.2)"></div>Visited</div>
+        <div class="legend-item"><div class="swatch" style="background:var(--unknown);border:1px solid rgba(26,58,92,.5)"></div>Unknown</div>
+        <div class="legend-item"><div class="swatch" style="background:rgba(255,61,90,.18);border:1px solid var(--danger)"></div>Hazard (revealed)</div>
+        <div class="legend-item"><div class="swatch" style="background:rgba(255,215,0,.15);border:1px solid var(--gold-c)"></div>Gold</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── CENTER: GRID ── -->
+  <div class="grid-area">
+    <div id="percept-row" class="percept-badges">
+      <span class="percept-badge none">NO PERCEPTS</span>
+    </div>
+    <div id="grid-container"></div>
+    <div id="result-banner" style="display:none;font-family:var(--font-display);font-size:1.5rem;letter-spacing:6px;text-align:center;padding:12px 30px;border:1px solid;border-radius:3px;"></div>
+  </div>
+
+  <!-- ── RIGHT PANEL: METRICS ── -->
+  <div class="panel">
+    <div class="panel-title">// Inference Dashboard</div>
+    <div class="panel-body">
+
+      <div class="score-row">
+        <div class="metric-block">
+          <div class="metric-label">Score</div>
+          <div class="metric-value gold" id="m-score">—</div>
+        </div>
+        <div class="metric-block">
+          <div class="metric-label">Steps</div>
+          <div class="metric-value" id="m-moves">—</div>
+        </div>
+      </div>
+
+      <div class="metric-block">
+        <div class="metric-label">Resolution Inference Steps</div>
+        <div class="metric-value green" id="m-infer">0</div>
+        <div class="metric-sub">Cumulative PL-Resolution calls</div>
+      </div>
+
+      <div class="metric-block">
+        <div class="metric-label">KB Clauses</div>
+        <div class="metric-value" id="m-clauses">0</div>
+        <div class="metric-sub">Propositional clauses in memory</div>
+      </div>
+
+      <div class="metric-block">
+        <div class="metric-label">Cells Visited / Total</div>
+        <div class="metric-value" id="m-visited">0 / 0</div>
+      </div>
+
+      <div class="metric-block">
+        <div class="metric-label">Active Percepts</div>
+        <div id="m-percepts" style="font-family:var(--font-mono);font-size:.8rem;color:var(--text);margin-top:4px;min-height:24px">—</div>
+      </div>
+
+      <div class="metric-label" style="margin-bottom:6px;letter-spacing:1.5px">AGENT LOG</div>
+      <div class="log-box" id="log-box"></div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────
+let game = null;
+let revealed = false;
+let autoTimer = null;
+let moveCount = 0;
+
+const speedSlider = document.getElementById('speed-slider');
+speedSlider.addEventListener('input', () => {
+  document.getElementById('speed-val').textContent = speedSlider.value + 'ms';
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = setInterval(stepAgent, +speedSlider.value); }
+});
+
+// ─────────────────────────────────────
+//  API CALLS
+// ─────────────────────────────────────
+async function newGame() {
+  stopAuto();
+  revealed = false;
+  moveCount = 0;
+  const rows = +document.getElementById('rows-slider').value;
+  const cols = +document.getElementById('cols-slider').value;
+  const res = await fetch('/api/new', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({rows, cols})
+  });
+  game = await res.json();
+  document.getElementById('step-btn').disabled = false;
+  document.getElementById('auto-btn').disabled = false;
+  document.getElementById('reveal-btn').disabled = false;
+  document.getElementById('result-banner').style.display = 'none';
+  renderAll();
+}
+
+async function stepAgent() {
+  if (!game || game.status !== 'playing') { stopAuto(); return; }
+  const res = await fetch('/api/step', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(game)
+  });
+  game = await res.json();
+  moveCount++;
+  renderAll();
+  if (game.status !== 'playing') {
+    stopAuto();
+    showResult();
+  }
+}
+
+function revealAll() {
+  if (!game) return;
+  revealed = true;
+  renderGrid();
+}
+
+// ─────────────────────────────────────
+//  AUTO RUN
+// ─────────────────────────────────────
+function toggleAuto() {
+  if (autoTimer) { stopAuto(); return; }
+  document.getElementById('auto-btn').textContent = '⏹ STOP';
+  autoTimer = setInterval(stepAgent, +speedSlider.value);
+}
+function stopAuto() {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  document.getElementById('auto-btn').textContent = '⟳ AUTO RUN';
+}
+
+// ─────────────────────────────────────
+//  RENDER
+// ─────────────────────────────────────
+function renderAll() {
+  renderGrid();
+  renderPercepts();
+  renderMetrics();
+  renderLog();
+  renderStatus();
+}
+
+function renderGrid() {
+  if (!game) return;
+  const { rows, cols, agent, visited, safe_cells, pits, wumpus, gold, confirmed_hazards } = game;
+  const container = document.getElementById('grid-container');
+  container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+  // compute cell size
+  const maxW = Math.min(window.innerWidth * 0.45, 600);
+  const maxH = window.innerHeight * 0.65;
+  const cellSize = Math.floor(Math.min(maxW / cols, maxH / rows, 80));
+  container.style.gap = '3px';
+
+  const agentKey = `${agent[0]}_${agent[1]}`;
+  const visitedSet = new Set(visited.map(v => `${v[0]}_${v[1]}`));
+  const safeSet = new Set(safe_cells.map(s => `${s[0]}_${s[1]}`));
+  const pitSet = new Set(pits.map(p => `${p[0]}_${p[1]}`));
+  const hazardSet = new Set(confirmed_hazards.map(h => `${h[0]}_${h[1]}`));
+  const wumpusKey = wumpus ? `${wumpus[0]}_${wumpus[1]}` : null;
+  const goldKey = `${gold[0]}_${gold[1]}`;
+
+  container.innerHTML = '';
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const key = `${r}_${c}`;
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.style.width = div.style.height = cellSize + 'px';
+      div.style.fontSize = Math.max(14, cellSize * 0.38) + 'px';
+
+      const label = document.createElement('span');
+      label.className = 'cell-label';
+      label.textContent = `${r},${c}`;
+      div.appendChild(label);
+
+      const inner = document.createElement('span');
+      inner.className = 'emoji';
+
+      let cssClass = 'unknown';
+
+      if (key === agentKey) {
+        cssClass = 'agent';
+        inner.textContent = '🤖';
+      } else if (revealed && pitSet.has(key)) {
+        cssClass = 'hazard';
+        inner.textContent = '🕳️';
+      } else if (revealed && wumpusKey === key) {
+        cssClass = 'hazard';
+        inner.textContent = '👹';
+      } else if (hazardSet.has(key)) {
+        cssClass = 'hazard';
+        inner.textContent = game.pits.some(p=>p[0]===r&&p[1]===c) ? '🕳️' : '👹';
+      } else if (revealed && goldKey === key) {
+        cssClass = 'gold-here';
+        inner.textContent = '💰';
+      } else if (visitedSet.has(key)) {
+        cssClass = 'visited';
+        inner.textContent = '';
+      } else if (safeSet.has(key)) {
+        cssClass = 'safe-inferred';
+        inner.textContent = '✓';
+        inner.style.color = 'var(--accent2)';
+        inner.style.fontSize = (cellSize * 0.3) + 'px';
+      } else {
+        cssClass = 'unknown';
+        inner.textContent = '?';
+        inner.style.color = 'var(--text-dim)';
+        inner.style.fontSize = (cellSize * 0.3) + 'px';
+      }
+
+      div.classList.add(cssClass);
+      div.appendChild(inner);
+      container.appendChild(div);
+    }
+  }
+}
+
+function renderPercepts() {
+  if (!game) return;
+  const row = document.getElementById('percept-row');
+  const percepts = game.percepts || [];
+  if (!percepts.length) {
+    row.innerHTML = '<span class="percept-badge none">NO PERCEPTS</span>';
+    return;
+  }
+  row.innerHTML = percepts.map(p => {
+    const cls = p === 'Breeze' ? 'breeze' : p === 'Stench' ? 'stench' : 'glitter';
+    const icon = p === 'Breeze' ? '💨' : p === 'Stench' ? '🌫️' : '✨';
+    return `<span class="percept-badge ${cls}">${icon} ${p.toUpperCase()}</span>`;
+  }).join('');
+}
+
+function renderMetrics() {
+  if (!game) return;
+  document.getElementById('m-score').textContent = game.score;
+  document.getElementById('m-moves').textContent = moveCount;
+  document.getElementById('m-infer').textContent = game.total_steps;
+  document.getElementById('m-clauses').textContent = game.kb_clauses ? game.kb_clauses.length : 0;
+  document.getElementById('m-visited').textContent = `${game.visited.length} / ${game.rows * game.cols}`;
+
+  const p = game.percepts || [];
+  document.getElementById('m-percepts').textContent = p.length ? p.join(', ') : 'None';
+}
+
+function renderLog() {
+  if (!game || !game.log) return;
+  const box = document.getElementById('log-box');
+  box.innerHTML = [...game.log].reverse().slice(0, 30).map((l, i) =>
+    `<div class="log-line ${i===0?'new':''}">&gt; ${l}</div>`
+  ).join('');
+}
+
+function renderStatus() {
+  if (!game) return;
+  const pill = document.getElementById('status-pill');
+  const map = { playing:'RUNNING', won:'MISSION COMPLETE', dead:'AGENT DEAD', stuck:'STUCK' };
+  pill.textContent = map[game.status] || game.status.toUpperCase();
+  pill.className = 'status-pill ' + game.status;
+}
+
+function showResult() {
+  const banner = document.getElementById('result-banner');
+  if (game.status === 'won') {
+    banner.textContent = '🏆 MISSION COMPLETE';
+    banner.style.color = banner.style.borderColor = 'var(--gold-c)';
+  } else if (game.status === 'dead') {
+    banner.textContent = '💀 AGENT TERMINATED';
+    banner.style.color = banner.style.borderColor = 'var(--danger)';
+  } else {
+    banner.textContent = '⚠️ NO SAFE PATH FOUND';
+    banner.style.color = banner.style.borderColor = 'var(--warn)';
+  }
+  banner.style.display = 'block';
+  revealed = true;
+  renderGrid();
+}
+
+// ── Init ──
+window.addEventListener('resize', () => { if (game) renderGrid(); });
+</script>
+</body>
+</html>
